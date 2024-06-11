@@ -109,7 +109,9 @@ def export_torchscript(model, im, file, optimize, prefix=colorstr("TorchScript:"
 
 
 @try_export
-def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX:")):
+def export_onnx(
+    model, im, file, opset, dynamic, dynamic_batch, simplify, cleanup, prefix=colorstr("ONNX:")
+):
     # YOLO ONNX export
     check_requirements("onnx")
     import onnx
@@ -118,7 +120,16 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
     f = file.with_suffix(".onnx")
 
     output_names = ["output0", "output1"] if isinstance(model, SegmentationModel) else ["output0"]
-    if dynamic:
+
+    if dynamic_batch:
+        dynamic = {"images": {0: "batch"}}  # shape(1,3,640,640)
+
+        if isinstance(model, SegmentationModel):
+            dynamic["output0"] = {0: "batch"}  # shape(1,25200,85)
+            dynamic["output1"] = {0: "batch"}  # shape(1,32,160,160)
+        elif isinstance(model, DetectionModel):
+            dynamic["output0"] = {0: "batch"}  # shape(1,25200,85)
+    elif dynamic:
         dynamic = {"images": {0: "batch", 2: "height", 3: "width"}}  # shape(1,3,640,640)
         if isinstance(model, SegmentationModel):
             dynamic["output0"] = {0: "batch", 1: "anchors"}  # shape(1,25200,85)
@@ -131,15 +142,17 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
             dynamic["output0"] = {0: "batch", 1: "anchors"}  # shape(1,25200,85)
 
     torch.onnx.export(
-        model.cpu() if dynamic else model,  # --dynamic only compatible with cpu
-        im.cpu() if dynamic else im,
+        model.cpu()
+        if (dynamic or dynamic_batch)
+        else model,  # --(dynamic or dynamic_batch) only compatible with cpu
+        im.cpu() if (dynamic or dynamic_batch) else im,
         f,
         verbose=False,
         opset_version=opset,
         do_constant_folding=True,
         input_names=["images"],
         output_names=output_names,
-        dynamic_axes=dynamic or None,
+        dynamic_axes=(dynamic or dynamic_batch) or None,
     )
 
     # Checks
@@ -168,6 +181,19 @@ def export_onnx(model, im, file, opset, dynamic, simplify, prefix=colorstr("ONNX
             onnx.save(model_onnx, f)
         except Exception as e:
             LOGGER.info(f"{prefix} simplifier failure: {e}")
+
+    if cleanup:
+        try:
+            LOGGER.info("\nStarting to cleanup ONNX using onnx_graphsurgeon...")
+            import onnx_graphsurgeon as gs
+
+            graph = gs.import_onnx(model_onnx)
+            graph = graph.cleanup().toposort()
+            model_onnx = gs.export_onnx(graph)
+            onnx.save(model_onnx, f)
+        except Exception as e:
+            LOGGER.info(f"Cleanup failure: {e}")
+
     return f, model_onnx
 
 
@@ -177,6 +203,8 @@ def export_onnx_end2end(
     im,
     file,
     simplify,
+    cleanup,
+    dynamic_batch,
     topk_all,
     iou_thres,
     conf_thres,
@@ -192,9 +220,14 @@ def export_onnx_end2end(
     f = os.path.splitext(file)[0] + "-end2end.onnx"
     batch_size = "batch"
 
-    dynamic_axes = {
-        "images": {0: "batch", 2: "height", 3: "width"},
-    }  # variable length axes
+    if dynamic_batch:
+        dynamic_axes = {
+            "images": {0: "batch", 2: "height", 3: "width"},
+        }  # variable length axes
+    else:
+        dynamic_axes = {
+            "images": {0: "batch"},
+        }  # variable length axes
 
     output_axes = {
         "num_dets": {0: "batch"},
@@ -241,6 +274,19 @@ def export_onnx_end2end(
         # print(onnx.helper.printable_graph(onnx_model.graph))  # print a human readable model
         onnx.save(model_onnx, f)
         print("ONNX export success, saved as %s" % f)
+
+    if cleanup:
+        try:
+            print("\nStarting to cleanup ONNX using onnx_graphsurgeon...")
+            import onnx_graphsurgeon as gs
+
+            graph = gs.import_onnx(model_onnx)
+            graph = graph.cleanup().toposort()
+            model_onnx = gs.export_onnx(graph)
+            onnx.save(model_onnx, f)
+        except Exception as e:
+            print(f"Cleanup failure: {e}")
+
     return f, model_onnx
 
 
@@ -315,7 +361,9 @@ def export_engine(
     file,
     half,
     dynamic,
+    dynamic_batch,
     simplify,
+    cleanup,
     workspace=4,
     verbose=False,
     prefix=colorstr("TensorRT:"),
@@ -336,11 +384,11 @@ def export_engine(
     ):  # TensorRT 7 handling https://github.com/ultralytics/yolov5/issues/6012
         grid = model.model[-1].anchor_grid
         model.model[-1].anchor_grid = [a[..., :1, :1, :] for a in grid]
-        export_onnx(model, im, file, 12, dynamic, simplify)  # opset 12
+        export_onnx(model, im, file, 12, dynamic, dynamic_batch, simplify, cleanup)  # opset 12
         model.model[-1].anchor_grid = grid
     else:  # TensorRT >= 8
         check_version(trt.__version__, "8.0.0", hard=True)  # require tensorrt>=8.0.0
-        export_onnx(model, im, file, 12, dynamic, simplify)  # opset 12
+        export_onnx(model, im, file, 12, dynamic, dynamic_batch, simplify, cleanup)  # opset 12
     onnx = file.with_suffix(".onnx")
 
     LOGGER.info(f"\n{prefix} starting export with TensorRT {trt.__version__}...")
@@ -623,6 +671,7 @@ def run(
     int8=False,  # CoreML/TF INT8 quantization
     dynamic=False,  # ONNX/TF/TensorRT: dynamic axes
     simplify=False,  # ONNX: simplify model
+    cleanup=False,  # ONNX: cleanup model
     opset=12,  # ONNX: opset version
     verbose=False,  # TensorRT: verbose log
     workspace=4,  # TensorRT: workspace size (GB)
@@ -632,6 +681,7 @@ def run(
     topk_all=100,  # TF.js NMS: topk for all classes to keep
     iou_thres=0.45,  # TF.js NMS: IoU threshold
     conf_thres=0.25,  # TF.js NMS: confidence threshold
+    dynamic_batch=False,  # ONNX: dynamic batch-size
 ):
     t = time.time()
     include = [x.lower() for x in include]  # to lowercase
@@ -707,14 +757,26 @@ def run(
     if jit:  # TorchScript
         f[0], _ = export_torchscript(model, im, file, optimize)
     if engine:  # TensorRT required before ONNX
-        f[1], _ = export_engine(model, im, file, half, dynamic, simplify, workspace, verbose)
+        f[1], _ = export_engine(
+            model, im, file, half, dynamic, dynamic_batch, simplify, cleanup, workspace, verbose
+        )
     if onnx or xml:  # OpenVINO requires ONNX
-        f[2], _ = export_onnx(model, im, file, opset, dynamic, simplify)
+        f[2], _ = export_onnx(model, im, file, opset, dynamic, dynamic_batch, simplify, cleanup)
     if onnx_end2end:
         if isinstance(model, DetectionModel):
             labels = model.names
             f[2], _ = export_onnx_end2end(
-                model, im, file, simplify, topk_all, iou_thres, conf_thres, device, len(labels)
+                model,
+                im,
+                file,
+                simplify,
+                cleanup,
+                dynamic_batch,
+                topk_all,
+                iou_thres,
+                conf_thres,
+                device,
+                len(labels),
             )
         else:
             raise RuntimeError("The model is not a DetectionModel.")
@@ -843,6 +905,12 @@ def parse_opt():
         nargs="+",
         default=["torchscript"],
         help="torchscript, onnx, onnx_end2end, openvino, engine, coreml, saved_model, pb, tflite, edgetpu, tfjs, paddle",
+    )
+    parser.add_argument(
+        "--cleanup", action="store_true", help="ONNX: using onnx_graphsurgeon to cleanup"
+    )
+    parser.add_argument(
+        "--dynamic-batch", action="store_true", help="ONNX/TF/TensorRT: dynamic axes"
     )
     opt = parser.parse_args()
 
