@@ -15,7 +15,7 @@ class BCEBlurWithLogitsLoss(nn.Module):
     # BCEwithLogitLoss() with reduced missing label effects.
     def __init__(self, alpha=0.05):
         super().__init__()
-        self.loss_fcn = nn.BCEWithLogitsLoss(reduction='none')  # must be nn.BCEWithLogitsLoss()
+        self.loss_fcn = nn.BCEWithLogitsLoss(reduction="none")  # must be nn.BCEWithLogitsLoss()
         self.alpha = alpha
 
     def forward(self, pred, true):
@@ -36,7 +36,7 @@ class FocalLoss(nn.Module):
         self.gamma = gamma
         self.alpha = alpha
         self.reduction = loss_fcn.reduction
-        self.loss_fcn.reduction = 'none'  # required to apply FL to each element
+        self.loss_fcn.reduction = "none"  # required to apply FL to each element
 
     def forward(self, pred, true):
         loss = self.loss_fcn(pred, true)
@@ -50,9 +50,9 @@ class FocalLoss(nn.Module):
         modulating_factor = (1.0 - p_t) ** self.gamma
         loss *= alpha_factor * modulating_factor
 
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             return loss.mean()
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return loss.sum()
         else:  # 'none'
             return loss
@@ -66,7 +66,7 @@ class QFocalLoss(nn.Module):
         self.gamma = gamma
         self.alpha = alpha
         self.reduction = loss_fcn.reduction
-        self.loss_fcn.reduction = 'none'  # required to apply FL to each element
+        self.loss_fcn.reduction = "none"  # required to apply FL to each element
 
     def forward(self, pred, true):
         loss = self.loss_fcn(pred, true)
@@ -76,9 +76,9 @@ class QFocalLoss(nn.Module):
         modulating_factor = torch.abs(true - pred_prob) ** self.gamma
         loss *= alpha_factor * modulating_factor
 
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             return loss.mean()
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return loss.sum()
         else:  # 'none'
             return loss
@@ -93,21 +93,29 @@ class ComputeLoss:
         h = model.hyp  # hyperparameters
 
         # Define criteria
-        BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], device=device))
-        BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], device=device))
+        BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["cls_pw"]], device=device))
+        BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["obj_pw"]], device=device))
 
         # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
-        self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
+        self.cp, self.cn = smooth_BCE(
+            eps=h.get("label_smoothing", 0.0)
+        )  # positive, negative BCE targets
 
         # Focal loss
-        g = h['fl_gamma']  # focal loss gamma
+        g = h["fl_gamma"]  # focal loss gamma
         if g > 0:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
         m = de_parallel(model).model[-1]  # Detect() module
         self.balance = {3: [4.0, 1.0, 0.4]}.get(m.nl, [4.0, 1.0, 0.25, 0.06, 0.02])  # P3-P7
         self.ssi = list(m.stride).index(16) if autobalance else 0  # stride 16 index
-        self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 1.0, h, autobalance
+        self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = (
+            BCEcls,
+            BCEobj,
+            1.0,
+            h,
+            autobalance,
+        )
         self.nc = m.nc  # number of classes
         self.nl = m.nl  # number of layers
         self.anchors = m.anchors
@@ -121,12 +129,16 @@ class ComputeLoss:
         # Losses
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, gj, gi = indices[i]  # image, anchor, gridy, gridx
-            tobj = torch.zeros((pi.shape[0], pi.shape[2], pi.shape[3]), dtype=pi.dtype, device=self.device)  # tgt obj
+            tobj = torch.zeros(
+                (pi.shape[0], pi.shape[2], pi.shape[3]), dtype=pi.dtype, device=self.device
+            )  # tgt obj
 
             n_labels = b.shape[0]  # number of labels
             if n_labels:
                 # pxy, pwh, _, pcls = pi[b, a, gj, gi].tensor_split((2, 4, 5), dim=1)  # faster, requires torch 1.8.0
-                pxy, pwh, _, pcls = pi[b, :, gj, gi].split((2, 2, 1, self.nc), 1)  # target-subset of predictions
+                pxy, pwh, _, pcls = pi[b, :, gj, gi].split(
+                    (2, 2, 1, self.nc), 1
+                )  # target-subset of predictions
 
                 # Regression
                 # pwh = (pwh.sigmoid() * 2) ** 2 * anchors[i]
@@ -163,9 +175,9 @@ class ComputeLoss:
 
         if self.autobalance:
             self.balance = [x / self.balance[self.ssi] for x in self.balance]
-        loss[0] *= self.hyp['box']
-        loss[1] *= self.hyp['obj']
-        loss[2] *= self.hyp['cls']
+        loss[0] *= self.hyp["box"]
+        loss[1] *= self.hyp["obj"]
+        loss[2] *= self.hyp["cls"]
         return loss.sum() * bs, loss.detach()  # [box, obj, cls] losses
 
     def build_targets(self, p, targets):
@@ -175,16 +187,20 @@ class ComputeLoss:
         gain = torch.ones(6, device=self.device)  # normalized to gridspace gain
 
         g = 0.3  # bias
-        off = torch.tensor(
-            [
-                [0, 0],
-                [1, 0],
-                [0, 1],
-                [-1, 0],
-                [0, -1],  # j,k,l,m
-                # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
-            ],
-            device=self.device).float() * g  # offsets
+        off = (
+            torch.tensor(
+                [
+                    [0, 0],
+                    [1, 0],
+                    [0, 1],
+                    [-1, 0],
+                    [0, -1],  # j,k,l,m
+                    # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
+                ],
+                device=self.device,
+            ).float()
+            * g
+        )  # offsets
 
         for i in range(self.nl):
             shape = p[i].shape
@@ -195,7 +211,7 @@ class ComputeLoss:
             if nt:
                 # Matches
                 r = t[..., 4:6] / self.anchors[i]  # wh ratio
-                j = torch.max(r, 1 / r).max(1)[0] < self.hyp['anchor_t']  # compare
+                j = torch.max(r, 1 / r).max(1)[0] < self.hyp["anchor_t"]  # compare
                 # j = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
                 t = t[j]  # filter
 
@@ -218,7 +234,9 @@ class ComputeLoss:
             gi, gj = gij.T  # grid indices
 
             # Append
-            indices.append((b, gj.clamp_(0, shape[2] - 1), gi.clamp_(0, shape[3] - 1)))  # image, grid_y, grid_x indices
+            indices.append(
+                (b, gj.clamp_(0, shape[2] - 1), gi.clamp_(0, shape[3] - 1))
+            )  # image, grid_y, grid_x indices
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             tcls.append(c)  # class
 
@@ -234,26 +252,34 @@ class ComputeLoss_NEW:
         h = model.hyp  # hyperparameters
 
         # Define criteria
-        BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['cls_pw']], device=device))
-        BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h['obj_pw']], device=device))
+        BCEcls = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["cls_pw"]], device=device))
+        BCEobj = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([h["obj_pw"]], device=device))
 
         # Class label smoothing https://arxiv.org/pdf/1902.04103.pdf eqn 3
-        self.cp, self.cn = smooth_BCE(eps=h.get('label_smoothing', 0.0))  # positive, negative BCE targets
+        self.cp, self.cn = smooth_BCE(
+            eps=h.get("label_smoothing", 0.0)
+        )  # positive, negative BCE targets
 
         # Focal loss
-        g = h['fl_gamma']  # focal loss gamma
+        g = h["fl_gamma"]  # focal loss gamma
         if g > 0:
             BCEcls, BCEobj = FocalLoss(BCEcls, g), FocalLoss(BCEobj, g)
 
         m = de_parallel(model).model[-1]  # Detect() module
         self.balance = {3: [4.0, 1.0, 0.4]}.get(m.nl, [4.0, 1.0, 0.25, 0.06, 0.02])  # P3-P7
         self.ssi = list(m.stride).index(16) if autobalance else 0  # stride 16 index
-        self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 1.0, h, autobalance
+        self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = (
+            BCEcls,
+            BCEobj,
+            1.0,
+            h,
+            autobalance,
+        )
         self.nc = m.nc  # number of classes
         self.nl = m.nl  # number of layers
         self.anchors = m.anchors
         self.device = device
-        self.BCE_base = nn.BCEWithLogitsLoss(reduction='none')
+        self.BCE_base = nn.BCEWithLogitsLoss(reduction="none")
 
     def __call__(self, p, targets):  # predictions, targets
         tcls, tbox, indices = self.build_targets(p, targets)  # targets
@@ -266,18 +292,28 @@ class ComputeLoss_NEW:
         for i, pi in enumerate(p):  # layer index, layer predictions
             b, gj, gi = indices[i]  # image, anchor, gridy, gridx
             if n_labels:
-                pxy, pwh, pobj, pcls = pi[b, :, gj, gi].split((2, 2, 1, self.nc), 2)  # target-subset of predictions
+                pxy, pwh, pobj, pcls = pi[b, :, gj, gi].split(
+                    (2, 2, 1, self.nc), 2
+                )  # target-subset of predictions
 
                 # Regression
-                pbox = torch.cat((pxy.sigmoid() * 1.6 - 0.3, (0.2 + pwh.sigmoid() * 4.8) * self.anchors[i]), 2)
+                pbox = torch.cat(
+                    (pxy.sigmoid() * 1.6 - 0.3, (0.2 + pwh.sigmoid() * 4.8) * self.anchors[i]), 2
+                )
                 iou = bbox_iou(pbox, tbox[i], CIoU=True).squeeze()  # iou(predicted_box, target_box)
                 obj_target = iou.detach().clamp(0).type(pi.dtype)  # objectness targets
 
-                all_loss.append([(1.0 - iou) * self.hyp['box'],
-                                 self.BCE_base(pobj.squeeze(), torch.ones_like(obj_target)) * self.hyp['obj'],
-                                 self.BCE_base(pcls, F.one_hot(tcls[i], self.nc).float()).mean(2) * self.hyp['cls'],
-                                 obj_target,
-                                 tbox[i][..., 2] > 0.0])  # valid
+                all_loss.append(
+                    [
+                        (1.0 - iou) * self.hyp["box"],
+                        self.BCE_base(pobj.squeeze(), torch.ones_like(obj_target))
+                        * self.hyp["obj"],
+                        self.BCE_base(pcls, F.one_hot(tcls[i], self.nc).float()).mean(2)
+                        * self.hyp["cls"],
+                        obj_target,
+                        tbox[i][..., 2] > 0.0,
+                    ]
+                )  # valid
 
         # Lowest 3 losses per label
         n_assign = 4  # top n matches
@@ -293,10 +329,12 @@ class ComputeLoss_NEW:
         # Obj loss
         for i, (h, pi) in enumerate(zip(ij.chunk(self.nl, 1), p)):  # layer index, layer predictions
             b, gj, gi = indices[i]  # image, anchor, gridy, gridx
-            tobj = torch.zeros((pi.shape[0], pi.shape[2], pi.shape[3]), dtype=pi.dtype, device=self.device)  # obj
+            tobj = torch.zeros(
+                (pi.shape[0], pi.shape[2], pi.shape[3]), dtype=pi.dtype, device=self.device
+            )  # obj
             if n_labels:  # if any labels
                 tobj[b[h], gj[h], gi[h]] = all_loss[i][3][h]
-            loss[1] += self.BCEobj(pi[:, 4], tobj) * (self.balance[i] * self.hyp['obj'])
+            loss[1] += self.BCEobj(pi[:, 4], tobj) * (self.balance[i] * self.hyp["obj"])
 
         return loss.sum() * bs, loss.detach()  # [box, obj, cls] losses
 
@@ -316,7 +354,8 @@ class ComputeLoss_NEW:
                 [0, -1],  # j,k,l,m
                 # [1, 1], [1, -1], [-1, 1], [-1, -1],  # jk,jm,lk,lm
             ],
-            device=self.device).float()  # offsets
+            device=self.device,
+        ).float()  # offsets
 
         for i in range(self.nl):
             shape = p[i].shape
@@ -327,7 +366,7 @@ class ComputeLoss_NEW:
             if nt:
                 # # Matches
                 r = t[..., 4:6] / self.anchors[i]  # wh ratio
-                a = torch.max(r, 1 / r).max(1)[0] < self.hyp['anchor_t']  # compare
+                a = torch.max(r, 1 / r).max(1)[0] < self.hyp["anchor_t"]  # compare
                 # a = wh_iou(anchors, t[:, 4:6]) > model.hyp['iou_t']  # iou(3,n)=wh_iou(anchors(3,2), gwh(n,2))
                 # t = t[a]  # filter
 
@@ -351,7 +390,9 @@ class ComputeLoss_NEW:
             gi, gj = gij.transpose(0, 2).contiguous()  # grid indices
 
             # Append
-            indices.append((b, gj.clamp_(0, shape[2] - 1), gi.clamp_(0, shape[3] - 1)))  # image, grid_y, grid_x indices
+            indices.append(
+                (b, gj.clamp_(0, shape[2] - 1), gi.clamp_(0, shape[3] - 1))
+            )  # image, grid_y, grid_x indices
             tbox.append(torch.cat((gxy - gij, gwh), 2).permute(1, 0, 2).contiguous())  # box
             tcls.append(c)  # class
 

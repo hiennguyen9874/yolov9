@@ -9,7 +9,18 @@ from ..general import resample_segments, segment2box
 from ..metrics import bbox_ioa
 
 
-def mixup(im, labels, segments, seg_cls, semantic_masks, im2, labels2, segments2, seg_cls2, semantic_masks2):
+def mixup(
+    im,
+    labels,
+    segments,
+    seg_cls,
+    semantic_masks,
+    im2,
+    labels2,
+    segments2,
+    seg_cls2,
+    semantic_masks2,
+):
     # Applies MixUp augmentation https://arxiv.org/pdf/1710.09412.pdf
     r = np.random.beta(32.0, 32.0)  # mixup ratio, alpha=beta=32.0
     im = (im * r + im2 * (1 - r)).astype(np.uint8)
@@ -20,16 +31,18 @@ def mixup(im, labels, segments, seg_cls, semantic_masks, im2, labels2, segments2
     return im, labels, segments, seg_cls, semantic_masks
 
 
-def random_perspective(im,
-                       targets=(),
-                       segments=(),
-                       semantic_masks = (),
-                       degrees=10,
-                       translate=.1,
-                       scale=.1,
-                       shear=10,
-                       perspective=0.0,
-                       border=(0, 0)):
+def random_perspective(
+    im,
+    targets=(),
+    segments=(),
+    semantic_masks=(),
+    degrees=10,
+    translate=0.1,
+    scale=0.1,
+    shear=10,
+    perspective=0.0,
+    border=(0, 0),
+):
     # torchvision.transforms.RandomAffine(degrees=(-10, 10), translate=(.1, .1), scale=(.9, 1.1), shear=(-10, 10))
     # targets = [cls, xyxy]
 
@@ -61,8 +74,8 @@ def random_perspective(im,
 
     # Translation
     T = np.eye(3)
-    T[0, 2] = (random.uniform(0.5 - translate, 0.5 + translate) * width)  # x translation (pixels)
-    T[1, 2] = (random.uniform(0.5 - translate, 0.5 + translate) * height)  # y translation (pixels)
+    T[0, 2] = random.uniform(0.5 - translate, 0.5 + translate) * width  # x translation (pixels)
+    T[1, 2] = random.uniform(0.5 - translate, 0.5 + translate) * height  # y translation (pixels)
 
     # Combined rotation matrix
     M = T @ S @ R @ P @ C  # order of operations (right to left) is IMPORTANT
@@ -89,7 +102,9 @@ def random_perspective(im,
             xy = np.ones((len(segment), 3))
             xy[:, :2] = segment
             xy = xy @ M.T  # transform
-            xy = (xy[:, :2] / xy[:, 2:3] if perspective else xy[:, :2])  # perspective rescale or affine
+            xy = (
+                xy[:, :2] / xy[:, 2:3] if perspective else xy[:, :2]
+            )  # perspective rescale or affine
 
             # clip
             new[i] = segment2box(xy, width, height)
@@ -97,7 +112,7 @@ def random_perspective(im,
 
         semantic_masks = resample_segments(semantic_masks)
         for i, semantic_mask in enumerate(semantic_masks):
-            #if i < n:
+            # if i < n:
             #    xy = np.ones((len(segments[i]), 3))
             #    xy[:, :2] = segments[i]
             #    xy = xy @ M.T  # transform
@@ -109,7 +124,9 @@ def random_perspective(im,
             xy_s = np.ones((len(semantic_mask), 3))
             xy_s[:, :2] = semantic_mask
             xy_s = xy_s @ M.T  # transform
-            xy_s = (xy_s[:, :2] / xy_s[:, 2:3] if perspective else xy_s[:, :2])  # perspective rescale or affine
+            xy_s = (
+                xy_s[:, :2] / xy_s[:, 2:3] if perspective else xy_s[:, :2]
+            )  # perspective rescale or affine
 
             new_semantic_masks.append(xy_s)
 
@@ -123,7 +140,15 @@ def random_perspective(im,
     return im, targets, new_segments, new_semantic_masks
 
 
-def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True, stride=32):
+def letterbox(
+    im,
+    new_shape=(640, 640),
+    color=(114, 114, 114),
+    auto=True,
+    scaleFill=False,
+    scaleup=True,
+    stride=32,
+):
     # Resize and pad image while meeting stride-multiple constraints
     shape = im.shape[:2]  # current shape [height, width]
     if isinstance(new_shape, int):
@@ -152,7 +177,9 @@ def letterbox(im, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleF
         im = cv2.resize(im, new_unpad, interpolation=cv2.INTER_LINEAR)
     top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
-    im = cv2.copyMakeBorder(im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)  # add border
+    im = cv2.copyMakeBorder(
+        im, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
+    )  # add border
     return im, ratio, (dw, dh)
 
 
@@ -164,7 +191,9 @@ def copy_paste(im, labels, segments, seg_cls, semantic_masks, p=0.5):
         im_new = np.zeros(im.shape, np.uint8)
 
         # calculate ioa first then select indexes randomly
-        boxes = np.stack([w - labels[:, 3], labels[:, 2], w - labels[:, 1], labels[:, 4]], axis=-1)  # (n, 4)
+        boxes = np.stack(
+            [w - labels[:, 3], labels[:, 2], w - labels[:, 1], labels[:, 4]], axis=-1
+        )  # (n, 4)
         ioa = bbox_ioa(boxes, labels[:, 1:5])  # intersection over area
         indexes = np.nonzero((ioa < 0.30).all(1))[0]  # (N, )
         n = len(indexes)
