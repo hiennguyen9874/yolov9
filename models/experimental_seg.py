@@ -129,13 +129,16 @@ class ONNX_ORT(nn.Module):
         )
 
     def forward(self, x):
-        boxes = x[0][:, :, :4]
-        conf = x[0][:, :, 4:5]
-        scores = x[0][:, :, 5 : 5 + self.nc]
+        preds = x[0]
         proto = x[1]
         batch_size, nm, proto_h, proto_w = proto.shape
-        mask = x[0][:, :, 5 + self.nc : 5 + self.nc + nm]
-        scores *= conf
+
+        preds = preds.permute(0, 2, 1)
+
+        boxes = preds[..., 0:4]
+        scores = preds[..., 4 : 4 + self.nc]
+        mask = preds[:, :, 4 + self.nc : 4 + self.nc + nm]
+
         boxes @= self.convert_matrix
         max_score, category_id = scores.max(2, keepdim=True)
         dis = category_id.float() * self.max_wh
@@ -232,13 +235,16 @@ class ONNX_ORT_ROIALIGN(nn.Module):
         # )
 
     def forward(self, x):
-        boxes = x[0][:, :, :4]
-        conf = x[0][:, :, 4:5]
-        scores = x[0][:, :, 5 : 5 + self.nc]
+        preds = x[0]
         proto = x[1]
         batch_size, nm, proto_h, proto_w = proto.shape
-        mask = x[0][:, :, 5 + self.nc : 5 + self.nc + nm]
-        scores *= conf
+
+        preds = preds.permute(0, 2, 1)
+
+        boxes = preds[..., 0:4]
+        scores = preds[..., 4 : 4 + self.nc]
+        mask = preds[:, :, 4 + self.nc : 4 + self.nc + nm]
+
         boxes @= self.convert_matrix
         max_score, category_id = scores.max(2, keepdim=True)
         dis = category_id.float() * self.max_wh
@@ -358,7 +364,11 @@ class TRT_EfficientNMS_TRT(torch.autograd.Function):
         det_boxes = torch.randn(batch_size, max_output_boxes, 4, device=device, dtype=dtype)
         det_scores = torch.randn(batch_size, max_output_boxes, device=device, dtype=dtype)
         det_classes = torch.randint(
-            0, num_classes, (batch_size, max_output_boxes), device=device, dtype=torch.int32
+            0,
+            num_classes,
+            (batch_size, max_output_boxes),
+            device=device,
+            dtype=torch.int32,
         )
         return num_det, det_boxes, det_scores, det_classes
 
@@ -462,7 +472,11 @@ class TRT_EfficientNMSCustom_TRT(torch.autograd.Function):
         det_boxes = torch.randn(batch_size, max_output_boxes, 4, device=device, dtype=dtype)
         det_scores = torch.randn(batch_size, max_output_boxes, device=device, dtype=dtype)
         det_classes = torch.randint(
-            0, num_classes, (batch_size, max_output_boxes), device=device, dtype=torch.int32
+            0,
+            num_classes,
+            (batch_size, max_output_boxes),
+            device=device,
+            dtype=torch.int32,
         )
         det_indices = torch.randint(
             0,
@@ -685,13 +699,16 @@ class ONNX_TRT(nn.Module):
         )
 
     def forward(self, x):
-        boxes = x[0][:, :, :4]
-        conf = x[0][:, :, 4:5]
-        scores = x[0][:, :, 5 : 5 + self.nc]
+        preds = x[0]
         proto = x[1]
         batch_size, nm, proto_h, proto_w = proto.shape
-        mask = x[0][:, :, 5 + self.nc : 5 + self.nc + nm]
-        scores *= conf
+
+        preds = preds.permute(0, 2, 1)
+
+        boxes = preds[..., 0:4]
+        scores = preds[..., 4 : 4 + self.nc]
+        mask = preds[:, :, 4 + self.nc : 4 + self.nc + nm]
+
         boxes @= self.convert_matrix
         max_score, category_id = scores.max(2, keepdim=True)
         dis = category_id.float() * self.max_wh
@@ -851,15 +868,15 @@ class ONNX_TRT2(nn.Module):
         self.score_activation = 0
 
     def forward(self, x):
-        boxes = x[0][:, :, :4]
-        conf = x[0][:, :, 4:5]
-        scores = x[0][:, :, 5 : 5 + self.nc]
+        preds = x[0]
         proto = x[1]
         batch_size, nm, proto_h, proto_w = proto.shape
-        total_object = batch_size * self.max_obj
-        masks = x[0][:, :, 5 + self.nc : 5 + self.nc + nm]
 
-        scores *= conf
+        preds = preds.permute(0, 2, 1)
+
+        boxes = preds[..., 0:4]
+        scores = preds[..., 4 : 4 + self.nc]
+        mask = preds[:, :, 4 + self.nc : 4 + self.nc + nm]
 
         num_det, det_boxes, det_scores, det_classes, det_indices = TRT_EfficientNMSCustom_TRT.apply(
             boxes,
@@ -946,13 +963,16 @@ class ONNX_TRT_ROIALIGN(nn.Module):
         self.sampling_ratio = sampling_ratio
 
     def forward(self, x):
-        boxes = x[0][:, :, :4]
-        conf = x[0][:, :, 4:5]
-        scores = x[0][:, :, 5 : 5 + self.nc]
+        preds = x[0]
         proto = x[1]
         batch_size, nm, proto_h, proto_w = proto.shape
-        mask = x[0][:, :, 5 + self.nc : 5 + self.nc + nm]
-        scores *= conf
+
+        preds = preds.permute(0, 2, 1)
+
+        boxes = preds[..., 0:4]
+        scores = preds[..., 4 : 4 + self.nc]
+        mask = preds[:, :, 4 + self.nc : 4 + self.nc + nm]
+
         boxes @= self.convert_matrix
         max_score, category_id = scores.max(2, keepdim=True)
         dis = category_id.float() * self.max_wh
@@ -1141,14 +1161,17 @@ class ONNX_TRT_ROIALIGN2(nn.Module):
         self.score_activation = 0
 
     def forward(self, x):
-        boxes = x[0][:, :, :4]
-        conf = x[0][:, :, 4:5]
-        scores = x[0][:, :, 5 : 5 + self.nc]
+        preds = x[0]
         proto = x[1]
         batch_size, nm, proto_h, proto_w = proto.shape
+
+        preds = preds.permute(0, 2, 1)
+
+        boxes = preds[..., 0:4]
+        scores = preds[..., 4 : 4 + self.nc]
+        masks = preds[:, :, 4 + self.nc : 4 + self.nc + nm]
+
         total_object = batch_size * self.max_obj
-        masks = x[0][:, :, 5 + self.nc : 5 + self.nc + nm]
-        scores *= conf
 
         num_det, det_boxes, det_scores, det_classes, det_indices = TRT_EfficientNMSCustom_TRT.apply(
             boxes,
@@ -1182,7 +1205,11 @@ class ONNX_TRT_ROIALIGN2(nn.Module):
             pooled_proto = TRT_RoIAlignDynamic_TRT.apply(
                 proto,
                 torch.cat(
-                    (batch_indices.unsqueeze(1).float(), det_boxes.view(total_object, 4)), dim=2
+                    (
+                        batch_indices.unsqueeze(1).float(),
+                        det_boxes.view(total_object, 4),
+                    ),
+                    dim=2,
                 ),
                 self.mask_resolution,
                 self.mask_resolution,
@@ -1287,3 +1314,43 @@ class End2EndRoialign(nn.Module):
         x = self.model(x)
         x = self.end2end(x)
         return x
+
+
+class YOLOv5Output(nn.Module):
+    def __init__(self, model, nc=80):
+        super(YOLOv5Output, self).__init__()
+        self.model = model
+        self.nc = nc
+
+    def forward(self, x):
+        preds, protos = self.model(x)
+        preds = preds.permute((0, 2, 1))
+
+        boxes = preds[:, :, :4]
+        classes = preds[:, :, 4 : self.nc + 4]
+        masks = preds[:, :, self.nc + 4 :]
+
+        return (
+            torch.cat(
+                (
+                    boxes,
+                    torch.ones(
+                        (boxes.shape[0], boxes.shape[1], 1),
+                        device=boxes.device,
+                        dtype=boxes.dtype,
+                    ),
+                    classes,
+                    masks,
+                ),
+                dim=2,
+            ),
+            protos,
+        )
+
+    @property
+    def stride(self):
+        return self.model.stride
+
+    @property
+    def names(self):
+        return self.model.names

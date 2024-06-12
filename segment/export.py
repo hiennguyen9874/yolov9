@@ -17,7 +17,7 @@ if platform.system() != "Windows":
     ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 from models.experimental import attempt_load
-from models.experimental_seg import End2End, End2EndRoialign
+from models.experimental_seg import End2End, End2EndRoialign, YOLOv5Output
 from models.yolo import (
     ClassificationModel,
     DDetect,
@@ -94,6 +94,7 @@ def export_onnx(
     cleanup,
     roi_align,
     roi_align_type,
+    yolov5_output,
     prefix=colorstr("ONNX:"),
 ):
     # YOLO ONNX export
@@ -171,6 +172,11 @@ def export_onnx(
                 trt=trt,
                 max_wh=max(image_size),
             )
+    elif yolov5_output:
+        model = YOLOv5Output(
+            model,
+            nc=len(model.names),
+        )
 
     torch.onnx.export(
         (model.cpu() if (dynamic or dynamic_batch) else model),
@@ -262,6 +268,7 @@ def run(
     cleanup=False,
     roi_align=False,
     roi_align_type=0,
+    yolov5_output=False,
 ):
     t = time.time()
     include = [x.lower() for x in include]  # to lowercase
@@ -286,6 +293,9 @@ def run(
         ), "--half not compatible with --dynamic, i.e. use either --half or --dynamic but not both"
     model = attempt_load(weights, device=device, inplace=True, fuse=True)  # load FP32 model
 
+    dynamic = False if dynamic_batch else dynamic
+    dynamic = False if end2end else dynamic
+
     # Checks
     imgsz *= 2 if len(imgsz) == 1 else 1  # expand
     if optimize:
@@ -308,6 +318,7 @@ def run(
 
     for _ in range(2):
         y = model(im)  # dry runs
+
     if half:
         im, model = im.half(), model.half()  # to FP16
     shape = tuple((y[0] if isinstance(y, (tuple, list)) else y).shape)  # model output shape
@@ -346,6 +357,7 @@ def run(
             end2end=end2end,
             trt=trt,
             roi_align_type=roi_align_type,
+            yolov5_output=yolov5_output,
         )
 
     # Finish
@@ -468,21 +480,14 @@ def parse_opt():
     )
     parser.add_argument("--end2end", action="store_true", help="ONNX: NMS")
     parser.add_argument("--trt", action="store_true", help="ONNX: TRT")
-
     parser.add_argument(
         "--roi-align-type",
         type=int,
         default=0,
         help="ONNX: Roialign type, 0: RoiAlign, 1: RoIAlignDynamic_TRT, 2: RoIAlign2Dynamic_TRT",
     )
+    parser.add_argument("--yolov5-output", action="store_true", help="ONNX: NMS")
     opt = parser.parse_args()
-
-    if "onnx_end2end" in opt.include:
-        opt.simplify = True
-        opt.dynamic = True
-        opt.inplace = True
-        opt.half = False
-
     print_args(vars(opt))
     return opt
 
