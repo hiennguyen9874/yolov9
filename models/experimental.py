@@ -189,11 +189,7 @@ class ONNX_ORT(nn.Module):
         if isinstance(x, list):  ## yolov9-c.pt and yolov9-e.pt return list
             x = x[1]
         x = x.permute(0, 2, 1)
-        bboxes_x = x[..., 0:1]
-        bboxes_y = x[..., 1:2]
-        bboxes_w = x[..., 2:3]
-        bboxes_h = x[..., 3:4]
-        bboxes = torch.cat([bboxes_x, bboxes_y, bboxes_w, bboxes_h], dim=-1)
+        bboxes = x[..., :4]
         bboxes = bboxes.unsqueeze(2)  # [n_batch, n_bboxes, 4] -> [n_batch, n_bboxes, 1, 4]
         obj_conf = x[..., 4:]
         scores = obj_conf
@@ -237,11 +233,7 @@ class ONNX_TRT(nn.Module):
         if isinstance(x, list):  ## yolov9-c.pt and yolov9-e.pt return list
             x = x[1]
         x = x.permute(0, 2, 1)
-        bboxes_x = x[..., 0:1]
-        bboxes_y = x[..., 1:2]
-        bboxes_w = x[..., 2:3]
-        bboxes_h = x[..., 3:4]
-        bboxes = torch.cat([bboxes_x, bboxes_y, bboxes_w, bboxes_h], dim=-1)
+        bboxes = x[..., :4]
         bboxes = bboxes.unsqueeze(2)  # [n_batch, n_bboxes, 4] -> [n_batch, n_bboxes, 1, 4]
         obj_conf = x[..., 4:]
         scores = obj_conf
